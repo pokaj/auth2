@@ -17,4 +17,4 @@ $router->post('/register', 'AuthController@Register');
 
 $router->post('/oauth/authorize', 'AuthController@Authenticate');
 $router->post('/oauth/auth/{challenge}', 'AuthController@Login');
-$router->post('/oauth/verify/{challenge}/{auth_code}/{id}', 'AuthController@Verify');
+$router->post('/oauth/verify', 'AuthController@Verify');

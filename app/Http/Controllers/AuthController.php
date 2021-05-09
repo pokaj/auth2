@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use App\Models\User;
 use App\Models\AuthCodes;
+use App\Models\Challenges;
+use Carbon\Carbon;
 
 
 
@@ -23,7 +25,7 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
         $request['password'] = Hash::make($request['password']);
-        $user = User::create($request->all());
+        User::create($request->all());
         return response()->json(['code' => 0, 'desc' => 'successful'], 201);
     }
 
@@ -40,37 +42,45 @@ class AuthController extends Controller
             'email' => 'required',
             'password' => 'required',
         ]);
-        $email = $request['email'];
-        $password = $request['password'];
-        $user = User::where('email', $email)->first();
+        $user = User::where('email', $request['email'])->first();
         if($user){
-            if(Hash::check($password, $user->password)){
-                $random = bin2hex(openssl_random_pseudo_bytes(32));
-                $auth_code = Crypt::encryptString($random);
+            if(Hash::check($request['password'], $user->password)){
+                $auth_code = Crypt::encryptString(bin2hex(openssl_random_pseudo_bytes(32)));
+                Challenges::create([
+                   'user_id' => $user->id,
+                   'challenge' => $challenge,
+                ]);
                 AuthCodes::create(['auth_code' => $auth_code]);
-                return ''.$_ENV['PUBLIC_URL'].'verify/'.$challenge.'/'.$auth_code.'/'.$user['id'];
+                return response()->json(['auth_code' => $auth_code]);
             }
-            return ["code" => 1, "desc" => "unsuccessful"];
+            return ["code" => 1, "desc" => "unsuccessful: user entered wrong credentials"];
         }else{
-            return ["code" => 1, "desc" => "unsuccessful"];
+            return ["code" => 1, "desc" => "unsuccessful: user with this E-mail does not exist"];
         }
     }
 
 
 
-    public function Verify(Request $request, $challenge, $auth_code, $id){
-        $verifier = $request['verifier'];
-        $user = User::find($id);
-        $retrieveAuthCode = AuthCodes::where('auth_code', $auth_code)->first();
-        if(base64_decode($challenge) == $verifier && $retrieveAuthCode->expired == false){
+    public function Verify(Request $request)
+    {
+        $auth_code = AuthCodes::firstWhere('auth_code',$request['auth_code']);
+        if ($auth_code->created_at->diffInSeconds(Carbon::now()) > 30) {
+            return ["code" => 1, "desc" => "unsuccessful: user authorization code expired"];
+        }
+        $encoded_verifier = base64_encode($request['verifier']);
+        $user_challenge = Challenges::where('challenge', $encoded_verifier)->first();
+        if ($user_challenge->challenge == $encoded_verifier) {
+            $user = User::find($user_challenge->user_id);
             $token = $user->createToken('Laravel Password Grant Client');
             $response = ["code" => 0, "desc" => "successful", "data" => [
                 'acceess_token' => $token->accessToken, 'expires_at' => $token->token['expires_at'], 'user' => $user
             ]];
-            $retrieveAuthCode->delete();
+            $auth_code->delete();
+            $user_challenge->delete();
             return $response;
         }else{
-            return ["code" => 1, "desc" => "unsuccessful"];
+            return ["code" => 1, "desc" => "unsuccessful: user code verifier does not match code challenge"];
         }
     }
+
 }
